@@ -1,0 +1,503 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Touchless Fruit Slice</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #2A523A;
+            --panel: rgba(255,255,255,0.85);
+            --panel-border: rgba(148,163,184,0.55);
+            --text: #f8fafc;
+            --accent: #93c5fd;
+            --button: rgba(255,255,255,0.92);
+            --button-active: #dbeafe;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: var(--bg);
+        }
+        video,
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        video {
+            display: none;
+            visibility: hidden;
+            width: 1px;
+            height: 1px;
+            position: fixed;
+            left: -9999px;
+            top: -9999px;
+        }
+        canvas {
+            pointer-events: none;
+        }
+        #scoreBoard {
+            position: absolute;
+            left: 18px;
+            top: 18px;
+            padding: 14px 20px;
+            border-radius: 20px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            box-shadow: 0 18px 36px rgba(10, 18, 29, 0.26);
+        }
+        #controlPanel {
+            position: absolute;
+            right: 18px;
+            top: 18px;
+            display: grid;
+            grid-template-columns: repeat(2, auto);
+            gap: 14px;
+            padding: 12px;
+            border-radius: 22px;
+            background: rgba(15, 23, 42, 0.74);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(14px);
+            box-shadow: 0 18px 40px rgba(10, 18, 29, 0.28);
+        }
+        .controlButton {
+            min-width: 70px;
+            min-height: 70px;
+            border: none;
+            border-radius: 20px;
+            background: var(--button);
+            color: #0f172a;
+            font-size: 24px;
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+            transition: transform 0.16s ease, background 0.16s ease;
+        }
+        .controlButton:hover,
+        .controlButton:focus-visible {
+            transform: translateY(-2px);
+            background: var(--button-active);
+            outline: none;
+        }
+        .controlButton span {
+            display: block;
+            font-size: 13px;
+            margin-top: 6px;
+            color: #0f172a;
+            letter-spacing: 0.02em;
+        }
+        #instructions {
+            position: absolute;
+            left: 18px;
+            bottom: 18px;
+            max-width: 340px;
+            padding: 16px 18px;
+            border-radius: 22px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            font-size: 14px;
+            line-height: 1.7;
+            box-shadow: 0 18px 36px rgba(10, 18, 29, 0.24);
+        }
+        #instructions strong {
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="gameCanvas"></canvas>
+        <div id="scoreBoard">Score: <span id="scoreValue">0</span></div>
+        <div id="controlPanel"></div>
+        <div id="instructions">
+            <strong>Touchless slicing:</strong> move your index finger across the screen. Fruits fall gently from the top. Slice calmly to score points.
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreValue = document.getElementById('scoreValue');
+        const controlPanel = document.getElementById('controlPanel');
+
+        let canvasWidth = window.innerWidth;
+        let canvasHeight = window.innerHeight;
+        let pointer = { x: canvasWidth * 0.5, y: canvasHeight * 0.5, targetX: canvasWidth * 0.5, targetY: canvasHeight * 0.5, previous: [] };
+        let audioOn = true;
+        let paused = false;
+        let score = 0;
+        let fruits = [];
+        let halves = [];
+        let particles = [];
+        let lastSpawn = 0;
+        let lastFrameTime = performance.now();
+
+        const assets = {
+            background: { src: 'background_wood.png', image: new Image(), loaded: false },
+            knife: { src: 'knife.png', image: new Image(), loaded: false },
+            fruitTypes: [
+                { name: 'apple', color: '#ec4899', whole: 'apple_whole.png', half1: 'apple_half_1.png', half2: 'apple_half_2.png' },
+                { name: 'orange', color: '#fb923c', whole: 'orange_whole.png', half1: 'orange_half_1.png', half2: 'orange_half_2.png' },
+                { name: 'watermelon', color: '#22c55e', whole: 'watermelon_whole.png', half1: 'watermelon_half_1.png', half2: 'watermelon_half_2.png' }
+            ],
+        };
+
+        const pauseButton = document.createElement('button');
+        const muteButton = document.createElement('button');
+
+        function resizeCanvas() {
+            canvasWidth = window.innerWidth;
+            canvasHeight = window.innerHeight;
+            canvas.width = canvasWidth * devicePixelRatio;
+            canvas.height = canvasHeight * devicePixelRatio;
+            canvas.style.width = canvasWidth + 'px';
+            canvas.style.height = canvasHeight + 'px';
+            ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        }
+
+        function loadImageAsset(asset) {
+            return new Promise((resolve) => {
+                asset.image.src = asset.src;
+                asset.image.onload = () => {
+                    asset.loaded = true;
+                    resolve();
+                };
+                asset.image.onerror = () => resolve();
+            });
+        }
+
+        function imageValid(img) {
+            return img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+        }
+
+        async function preloadAssets() {
+            const promises = [loadImageAsset(assets.background), loadImageAsset(assets.knife)];
+            assets.fruitTypes.forEach((fruit) => {
+                fruit.wholeImage = new Image();
+                fruit.half1Image = new Image();
+                fruit.half2Image = new Image();
+                promises.push(new Promise((resolve) => {
+                    fruit.wholeImage.src = fruit.whole;
+                    fruit.wholeImage.onload = resolve;
+                    fruit.wholeImage.onerror = resolve;
+                }));
+                promises.push(new Promise((resolve) => {
+                    fruit.half1Image.src = fruit.half1;
+                    fruit.half1Image.onload = resolve;
+                    fruit.half1Image.onerror = resolve;
+                }));
+                promises.push(new Promise((resolve) => {
+                    fruit.half2Image.src = fruit.half2;
+                    fruit.half2Image.onload = resolve;
+                    fruit.half2Image.onerror = resolve;
+                }));
+            });
+            await Promise.all(promises);
+        }
+
+        function initControls() {
+            muteButton.className = 'controlButton';
+            muteButton.id = 'muteButton';
+            muteButton.innerHTML = '🔈<span>Mute</span>';
+            muteButton.addEventListener('click', () => {
+                audioOn = !audioOn;
+                muteButton.innerHTML = audioOn ? '🔈<span>Mute</span>' : '🔇<span>Muted</span>';
+            });
+
+            pauseButton.className = 'controlButton';
+            pauseButton.id = 'pauseButton';
+            pauseButton.innerHTML = '⏸<span>Pause</span>';
+            pauseButton.addEventListener('click', () => {
+                paused = !paused;
+                pauseButton.innerHTML = paused ? '▶️<span>Play</span>' : '⏸<span>Pause</span>';
+            });
+
+            controlPanel.appendChild(muteButton);
+            controlPanel.appendChild(pauseButton);
+        }
+
+        function spawnFruit() {
+            const type = assets.fruitTypes[Math.floor(Math.random() * assets.fruitTypes.length)];
+            const size = 48 + Math.random() * 26;
+            const x = 60 + Math.random() * (canvasWidth - 120);
+            const y = -size - 20;
+            const speed = 32 + Math.random() * 16;
+            fruits.push({ x, y, vx: 0, vy: speed, ay: 22, size, type, sliced: false });
+        }
+
+        function createHalfFruit(fruit, side) {
+            const velocityX = side === 'left' ? -80 - Math.random() * 24 : 80 + Math.random() * 24;
+            const halfImage = side === 'left' ? fruit.type.half1Image : fruit.type.half2Image;
+            halves.push({ x: fruit.x, y: fruit.y, vx: velocityX, vy: fruit.vy * 0.25 - 42, ay: 32, size: fruit.size, image: halfImage, life: 0 });
+        }
+
+        function createSliceEffects(x, y, fruit) {
+            for (let i = 0; i < 18; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 22 + Math.random() * 42;
+                particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed * 0.4, ay: 92, life: 0, ttl: 0.7 + Math.random() * 0.4, radius: 2 + Math.random() * 3, color: fruit.type.color });
+            }
+        }
+
+        function playSliceSound() {
+            if (!audioOn || !window.AudioContext) return;
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const gain = audioCtx.createGain();
+            const osc = audioCtx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.value = 260;
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.16, audioCtx.currentTime + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+            osc.onended = () => audioCtx.close();
+        }
+
+        function updateHandPoint(x, y) {
+            pointer.targetX = Math.min(Math.max(0, x), canvasWidth);
+            pointer.targetY = Math.min(Math.max(0, y), canvasHeight);
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = '#2A523A';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            if (imageValid(assets.background.image)) {
+                const img = assets.background.image;
+                const scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+                const width = img.width * scale;
+                const height = img.height * scale;
+                const x = (canvasWidth - width) / 2;
+                const y = (canvasHeight - height) / 2;
+                ctx.drawImage(img, x, y, width, height);
+            } else {
+                const plankHeight = 48;
+                const offset = (canvasHeight % (plankHeight * 2));
+                for (let y = -plankHeight; y < canvasHeight + plankHeight; y += plankHeight) {
+                    ctx.fillStyle = y % (plankHeight * 2) === 0 ? '#3b5e3f' : '#2e4f33';
+                    ctx.fillRect(0, y + offset, canvasWidth, plankHeight);
+                }
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                for (let i = 0; i < 18; i++) {
+                    const lineY = (i * 48) + 18;
+                    ctx.fillRect(0, lineY, canvasWidth, 1);
+                }
+            }
+        }
+
+        function drawKnife() {
+            const dx = pointer.targetX - pointer.x;
+            const dy = pointer.targetY - pointer.y;
+            pointer.x += dx * 0.36;
+            pointer.y += dy * 0.36;
+            pointer.previous.unshift({ x: pointer.x, y: pointer.y });
+            if (pointer.previous.length > 10) pointer.previous.pop();
+
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            pointer.previous.forEach((pos, index) => {
+                const alpha = 0.14 * (1 - index / pointer.previous.length);
+                ctx.fillStyle = `rgba(164, 222, 246, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 22 + index * 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.restore();
+
+            if (imageValid(assets.knife.image)) {
+                const knife = assets.knife.image;
+                const anchorX = knife.width * 0.88;
+                const anchorY = knife.height * 0.48;
+                const drawX = pointer.x - anchorX;
+                const drawY = pointer.y - anchorY;
+                ctx.drawImage(knife, drawX, drawY);
+            } else {
+                ctx.save();
+                ctx.translate(pointer.x, pointer.y);
+                ctx.rotate(Math.atan2(pointer.targetY - pointer.y, pointer.targetX - pointer.x));
+                ctx.beginPath();
+                ctx.moveTo(-4, -18);
+                ctx.lineTo(28, 0);
+                ctx.lineTo(-4, 18);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(236, 244, 255, 0.95)';
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(56, 189, 248, 0.95)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        function lineCircleCollision(x1, y1, x2, y2, cx, cy, r) {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const fx = x1 - cx;
+            const fy = y1 - cy;
+            const a = dx * dx + dy * dy;
+            const b = 2 * (fx * dx + fy * dy);
+            const c = fx * fx + fy * fy - r * r;
+            let discriminant = b * b - 4 * a * c;
+            if (discriminant < 0) return false;
+            discriminant = Math.sqrt(discriminant);
+            const t1 = (-b - discriminant) / (2 * a);
+            const t2 = (-b + discriminant) / (2 * a);
+            return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1);
+        }
+
+        function updateFrame(now) {
+            const dt = Math.min((now - lastFrameTime) / 1000, 0.04);
+            lastFrameTime = now;
+            drawBackground();
+
+            if (!paused) {
+                if (now - lastSpawn > 1400 + Math.random() * 1000) {
+                    spawnFruit();
+                    lastSpawn = now;
+                }
+
+                for (let i = fruits.length - 1; i >= 0; i--) {
+                    const fruit = fruits[i];
+                    fruit.vy += fruit.ay * dt;
+                    fruit.y += fruit.vy * dt;
+                    const prev = pointer.previous[1] || { x: pointer.x, y: pointer.y };
+                    const collision = lineCircleCollision(prev.x, prev.y, pointer.x, pointer.y, fruit.x, fruit.y, fruit.size * 0.88);
+                    if (!fruit.sliced && collision) {
+                        fruit.sliced = true;
+                        score += 1;
+                        scoreValue.textContent = score;
+                        createHalfFruit(fruit, 'left');
+                        createHalfFruit(fruit, 'right');
+                        createSliceEffects(fruit.x, fruit.y, fruit);
+                        playSliceSound();
+                        fruits.splice(i, 1);
+                        continue;
+                    }
+                    if (fruit.y - fruit.size > canvasHeight + 80) {
+                        fruits.splice(i, 1);
+                        continue;
+                    }
+                    const img = fruit.type.wholeImage;
+                    if (imageValid(img)) {
+                        ctx.drawImage(img, fruit.x - fruit.size, fruit.y - fruit.size, fruit.size * 2, fruit.size * 2);
+                    } else {
+                        ctx.fillStyle = fruit.type.color;
+                        ctx.beginPath();
+                        ctx.arc(fruit.x, fruit.y, fruit.size, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                for (let i = halves.length - 1; i >= 0; i--) {
+                    const half = halves[i];
+                    half.vy += half.ay * dt;
+                    half.x += half.vx * dt;
+                    half.y += half.vy * dt;
+                    half.vx *= 0.995;
+                    half.life += dt;
+                    if (half.y - half.size > canvasHeight + 100 || half.life > 2.4) {
+                        halves.splice(i, 1);
+                        continue;
+                    }
+                    if (imageValid(half.image)) {
+                        ctx.drawImage(half.image, half.x - half.size, half.y - half.size, half.size * 2, half.size * 2);
+                    } else {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.beginPath();
+                        ctx.arc(half.x, half.y, half.size * 0.95, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const particle = particles[i];
+                    particle.vy += particle.ay * dt;
+                    particle.x += particle.vx * dt;
+                    particle.y += particle.vy * dt;
+                    particle.life += dt;
+                    const progress = particle.life / particle.ttl;
+                    if (particle.life >= particle.ttl) {
+                        particles.splice(i, 1);
+                        continue;
+                    }
+                    ctx.globalAlpha = Math.max(0, 1 - progress);
+                    ctx.fillStyle = particle.color;
+                    ctx.beginPath();
+                    ctx.arc(particle.x, particle.y, particle.radius * (1 - progress * 0.5), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+            }
+
+            drawKnife();
+
+            if (paused) {
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.35)';
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                ctx.fillStyle = '#F8FAFC';
+                ctx.font = '700 46px Inter, system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Paused', canvasWidth / 2, canvasHeight / 2 - 14);
+            }
+
+            requestAnimationFrame(updateFrame);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        initControls();
+
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6, selfieMode: true });
+        hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                const indexTip = landmarks[8];
+                const x = canvasWidth * indexTip.x;
+                const y = canvasHeight * indexTip.y;
+                updateHandPoint(x, y);
+            }
+        });
+
+        const cameraFeed = new Camera(video, { onFrame: async () => { await hands.send({ image: video }); }, width: 1280, height: 720 });
+
+        preloadAssets().then(() => {
+            spawnFruit();
+            spawnFruit();
+            cameraFeed.start().catch((error) => {
+                console.warn('Webcam input not available. Game will continue without live hand tracking.', error);
+            });
+            requestAnimationFrame(updateFrame);
+        });
+    </script>
+</body>
+</html>
