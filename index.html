@@ -45,24 +45,28 @@
             object-fit: cover;
         }
         video {
-            display: none;
-            visibility: hidden;
-            width: 1px;
-            height: 1px;
-            position: fixed;
-            left: -9999px;
-            top: -9999px;
+            position: absolute;
+            left: 12px;
+            top: 12px;
+            transform: scaleX(-1);
+            width: 240px;
+            height: 160px;
+            object-fit: cover;
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,0.14);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.28);
+            z-index: 5;
         }
         canvas {
             pointer-events: none;
         }
         #scoreBoard {
             position: absolute;
-            left: 18px;
+            right: 18px;
             top: 18px;
             padding: 14px 20px;
             border-radius: 20px;
-            background: rgba(15, 23, 42, 0.7);
+            background: rgba(15, 23, 42, 0.75);
             border: 1px solid rgba(255, 255, 255, 0.15);
             font-size: 18px;
             font-weight: 700;
@@ -175,11 +179,12 @@
         function resizeCanvas() {
             canvasWidth = window.innerWidth;
             canvasHeight = window.innerHeight;
-            canvas.width = canvasWidth * devicePixelRatio;
-            canvas.height = canvasHeight * devicePixelRatio;
+            const DPR = Math.min(window.devicePixelRatio || 1, 1.2);
+            canvas.width = Math.floor(canvasWidth * DPR);
+            canvas.height = Math.floor(canvasHeight * DPR);
             canvas.style.width = canvasWidth + 'px';
             canvas.style.height = canvasHeight + 'px';
-            ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+            ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
         }
 
         function loadImageAsset(asset) {
@@ -245,25 +250,39 @@
 
         function spawnFruit() {
             const type = assets.fruitTypes[Math.floor(Math.random() * assets.fruitTypes.length)];
-            const size = 48 + Math.random() * 26;
-            const x = 60 + Math.random() * (canvasWidth - 120);
-            const y = -size - 20;
-            const speed = 32 + Math.random() * 16;
-            fruits.push({ x, y, vx: 0, vy: speed, ay: 22, size, type, sliced: false });
+            const size = 46 + Math.random() * 32;
+            const x = 40 + Math.random() * (canvasWidth - 80);
+            const y = -size - 10;
+            const speed = 98 + Math.random() * 38;
+            const vx = -28 + Math.random() * 56;
+            const rot = (Math.random() - 0.5) * 0.4;
+            const av = (Math.random() - 0.5) * 1.8;
+            fruits.push({ x, y, vx, vy: speed, ay: 42, size, type, sliced: false, rot, av });
+            if (Math.random() < 0.18) {
+                const extra = 1 + Math.floor(Math.random() * 2);
+                for (let i = 0; i < extra; i++) {
+                    const ex = Math.min(Math.max(40, x + (-100 + Math.random() * 200)), canvasWidth - 40);
+                    fruits.push({ x: ex, y: y - (i * 20), vx: -20 + Math.random() * 40, vy: 100 + Math.random() * 38, ay: 42, size: 34 + Math.random() * 28, type, sliced: false, rot: (Math.random()-0.5)*0.4, av: (Math.random()-0.5)*1.6 });
+                }
+            }
         }
 
         function createHalfFruit(fruit, side) {
-            const velocityX = side === 'left' ? -80 - Math.random() * 24 : 80 + Math.random() * 24;
+            const velocityX = side === 'left' ? -140 - Math.random() * 44 : 140 + Math.random() * 44;
             const halfImage = side === 'left' ? fruit.type.half1Image : fruit.type.half2Image;
-            halves.push({ x: fruit.x, y: fruit.y, vx: velocityX, vy: fruit.vy * 0.25 - 42, ay: 32, size: fruit.size, image: halfImage, life: 0 });
+            const source = fruit.type.wholeImage;
+            halves.push({ x: fruit.x, y: fruit.y, vx: velocityX, vy: fruit.vy * 0.25 - 46, ay: 48, size: fruit.size, image: halfImage, sourceImage: source, side, rot: (Math.random()-0.5)*1.8, av: (Math.random()-0.5)*3.2, life: 0 });
         }
 
         function createSliceEffects(x, y, fruit) {
             for (let i = 0; i < 18; i++) {
                 const angle = Math.random() * Math.PI * 2;
-                const speed = 22 + Math.random() * 42;
-                particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed * 0.4, ay: 92, life: 0, ttl: 0.7 + Math.random() * 0.4, radius: 2 + Math.random() * 3, color: fruit.type.color });
+                const speed = 34 + Math.random() * 76;
+                const col = fruit.type.color;
+                particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed * 0.45, ay: 120, life: 0, ttl: 0.55 + Math.random() * 0.4, radius: 2 + Math.random() * 4, color: col });
             }
+            particles.push({ x, y, vx:0, vy:0, ay:0, life:0, ttl:0.12, radius: 50, color: 'rgba(255,255,255,0.92)', flash:true });
+            particles.push({ x, y, vx:0, vy:0, ay:0, life:0, ttl:0.16, radius: 38, color: 'rgba(255,255,255,0.65)', glow:true });
         }
 
         function playSliceSound() {
@@ -289,8 +308,6 @@
         }
 
         function drawBackground() {
-            ctx.fillStyle = '#2A523A';
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
             if (imageValid(assets.background.image)) {
                 const img = assets.background.image;
                 const scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
@@ -299,16 +316,28 @@
                 const x = (canvasWidth - width) / 2;
                 const y = (canvasHeight - height) / 2;
                 ctx.drawImage(img, x, y, width, height);
+                ctx.fillStyle = 'rgba(6, 33, 24, 0.32)';
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                const grad = ctx.createRadialGradient(canvasWidth * 0.2, canvasHeight * 0.2, 0, canvasWidth * 0.2, canvasHeight * 0.2, canvasWidth * 0.75);
+                grad.addColorStop(0, 'rgba(255,255,255,0.08)');
+                grad.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
             } else {
-                const plankHeight = 48;
-                const offset = (canvasHeight % (plankHeight * 2));
-                for (let y = -plankHeight; y < canvasHeight + plankHeight; y += plankHeight) {
-                    ctx.fillStyle = y % (plankHeight * 2) === 0 ? '#3b5e3f' : '#2e4f33';
-                    ctx.fillRect(0, y + offset, canvasWidth, plankHeight);
-                }
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+                gradient.addColorStop(0, '#213b2b');
+                gradient.addColorStop(0.5, '#2b5a3f');
+                gradient.addColorStop(1, '#1b3529');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                const pane = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight);
+                pane.addColorStop(0, 'rgba(255,255,255,0.06)');
+                pane.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = pane;
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
                 ctx.fillStyle = 'rgba(255,255,255,0.08)';
-                for (let i = 0; i < 18; i++) {
-                    const lineY = (i * 48) + 18;
+                for (let i = 0; i < 16; i++) {
+                    const lineY = (i * 60) + 22;
                     ctx.fillRect(0, lineY, canvasWidth, 1);
                 }
             }
@@ -317,29 +346,35 @@
         function drawKnife() {
             const dx = pointer.targetX - pointer.x;
             const dy = pointer.targetY - pointer.y;
-            pointer.x += dx * 0.36;
-            pointer.y += dy * 0.36;
+            pointer.x += dx * 0.7;
+            pointer.y += dy * 0.7;
             pointer.previous.unshift({ x: pointer.x, y: pointer.y });
-            if (pointer.previous.length > 10) pointer.previous.pop();
+            if (pointer.previous.length > 6) pointer.previous.pop();
 
             ctx.save();
             ctx.globalCompositeOperation = 'lighter';
             pointer.previous.forEach((pos, index) => {
-                const alpha = 0.14 * (1 - index / pointer.previous.length);
+                const alpha = 0.14 * (1 - index / Math.max(1, pointer.previous.length));
                 ctx.fillStyle = `rgba(164, 222, 246, ${alpha})`;
                 ctx.beginPath();
-                ctx.arc(pos.x, pos.y, 22 + index * 2, 0, Math.PI * 2);
+                ctx.arc(pos.x, pos.y, 18 + index * 2, 0, Math.PI * 2);
                 ctx.fill();
             });
             ctx.restore();
 
             if (imageValid(assets.knife.image)) {
                 const knife = assets.knife.image;
-                const anchorX = knife.width * 0.88;
-                const anchorY = knife.height * 0.48;
-                const drawX = pointer.x - anchorX;
-                const drawY = pointer.y - anchorY;
-                ctx.drawImage(knife, drawX, drawY);
+                const angle = Math.atan2(pointer.targetY - pointer.y, pointer.targetX - pointer.x);
+                const scale = 0.72;
+                const drawWidth = knife.width * scale;
+                const drawHeight = knife.height * scale;
+                const anchorX = drawWidth * 0.92;
+                const anchorY = drawHeight * 0.5;
+                ctx.save();
+                ctx.translate(pointer.x, pointer.y);
+                ctx.rotate(angle);
+                ctx.drawImage(knife, -anchorX, -anchorY, drawWidth, drawHeight);
+                ctx.restore();
             } else {
                 ctx.save();
                 ctx.translate(pointer.x, pointer.y);
@@ -380,7 +415,7 @@
             drawBackground();
 
             if (!paused) {
-                if (now - lastSpawn > 1400 + Math.random() * 1000) {
+                if (now - lastSpawn > 380 + Math.random() * 180) {
                     spawnFruit();
                     lastSpawn = now;
                 }
@@ -388,9 +423,11 @@
                 for (let i = fruits.length - 1; i >= 0; i--) {
                     const fruit = fruits[i];
                     fruit.vy += fruit.ay * dt;
+                    fruit.x += (fruit.vx || 0) * dt;
                     fruit.y += fruit.vy * dt;
-                    const prev = pointer.previous[1] || { x: pointer.x, y: pointer.y };
-                    const collision = lineCircleCollision(prev.x, prev.y, pointer.x, pointer.y, fruit.x, fruit.y, fruit.size * 0.88);
+                    fruit.rot = (fruit.rot || 0) + (fruit.av || 0) * dt;
+                        const prev = pointer.previous[1] || { x: pointer.x, y: pointer.y };
+                        const collision = lineCircleCollision(prev.x, prev.y, pointer.x, pointer.y, fruit.x, fruit.y, fruit.size * 0.9);
                     if (!fruit.sliced && collision) {
                         fruit.sliced = true;
                         score += 1;
@@ -408,7 +445,11 @@
                     }
                     const img = fruit.type.wholeImage;
                     if (imageValid(img)) {
-                        ctx.drawImage(img, fruit.x - fruit.size, fruit.y - fruit.size, fruit.size * 2, fruit.size * 2);
+                        ctx.save();
+                        ctx.translate(fruit.x, fruit.y);
+                        ctx.rotate(fruit.rot || 0);
+                        ctx.drawImage(img, -fruit.size, -fruit.size, fruit.size * 2, fruit.size * 2);
+                        ctx.restore();
                     } else {
                         ctx.fillStyle = fruit.type.color;
                         ctx.beginPath();
@@ -422,6 +463,7 @@
                     half.vy += half.ay * dt;
                     half.x += half.vx * dt;
                     half.y += half.vy * dt;
+                    half.rot = (half.rot || 0) + (half.av || 0) * dt;
                     half.vx *= 0.995;
                     half.life += dt;
                     if (half.y - half.size > canvasHeight + 100 || half.life > 2.4) {
@@ -431,10 +473,23 @@
                     if (imageValid(half.image)) {
                         ctx.drawImage(half.image, half.x - half.size, half.y - half.size, half.size * 2, half.size * 2);
                     } else {
-                        ctx.fillStyle = '#ffffff';
-                        ctx.beginPath();
-                        ctx.arc(half.x, half.y, half.size * 0.95, 0, Math.PI * 2);
-                        ctx.fill();
+                            // if we don't have a half-sprite, clip the whole image into a left/right half
+                            if (imageValid(half.sourceImage)) {
+                                ctx.save();
+                                ctx.translate(half.x, half.y);
+                                ctx.rotate(half.rot || 0);
+                                ctx.beginPath();
+                                if (half.side === 'left') ctx.rect(-half.size, -half.size, half.size, half.size * 2);
+                                else ctx.rect(0, -half.size, half.size, half.size * 2);
+                                ctx.clip();
+                                ctx.drawImage(half.sourceImage, -half.size, -half.size, half.size * 2, half.size * 2);
+                                ctx.restore();
+                            } else {
+                                ctx.fillStyle = '#ffffff';
+                                ctx.beginPath();
+                                ctx.arc(half.x, half.y, half.size * 0.95, 0, Math.PI * 2);
+                                ctx.fill();
+                            }
                     }
                 }
 
@@ -449,11 +504,24 @@
                         particles.splice(i, 1);
                         continue;
                     }
-                    ctx.globalAlpha = Math.max(0, 1 - progress);
-                    ctx.fillStyle = particle.color;
-                    ctx.beginPath();
-                    ctx.arc(particle.x, particle.y, particle.radius * (1 - progress * 0.5), 0, Math.PI * 2);
-                    ctx.fill();
+                    if (particle.glow) {
+                        ctx.globalCompositeOperation = 'lighter';
+                        const g = ctx.createRadialGradient(particle.x, particle.y, 2, particle.x, particle.y, particle.radius * 1.6);
+                        g.addColorStop(0, particle.color);
+                        g.addColorStop(1, 'rgba(255,255,255,0)');
+                        ctx.fillStyle = g;
+                        ctx.beginPath();
+                        ctx.arc(particle.x, particle.y, particle.radius * (1 + (1 - progress) * 4), 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalCompositeOperation = 'source-over';
+                    } else {
+                        ctx.globalAlpha = Math.max(0, 1 - progress);
+                        ctx.fillStyle = particle.color;
+                        ctx.beginPath();
+                        ctx.arc(particle.x, particle.y, particle.radius * (1 - progress * 0.5), 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalAlpha = 1;
+                    }
                 }
                 ctx.globalAlpha = 1;
             }
